@@ -13,6 +13,7 @@ fn show_help(code: i32) {
     setx <var-name> [value]    if value is none, will remove this var.
     setx -[(a|append)|(p|prepend)|(d|delete)] <paths...>
     setx -[e|edit-path] <editor>    use editor edit PATH";
+
     eprintln!("{}", msg);
     exit(code)
 }
@@ -93,12 +94,10 @@ fn set_path(args: Vec<String>, flag: &str, cu_env: RegKey) -> IoResult<()> {
             let buf = path_var.replace(SEMICOLON, LF);
             file.write_all(buf.as_bytes())?;
 
-            let mut editor: &str = &args[0];
-            if editor == "code" {
-                editor = "code.cmd";
-            }
-            let mut cmd = Command::new(editor);
-            if ["code.cmd", "zed"].contains(&editor) {
+            let editor: &str = &args[0];
+            let mut cmd = Command::new("cmd.exe");
+            cmd.args(["/c", editor]);
+            if ["code", "zed"].contains(&editor) {
                 cmd.arg("--wait");
             }
             cmd.arg(&tmp_file_path).spawn()?.wait()?;
