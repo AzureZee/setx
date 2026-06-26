@@ -4,7 +4,8 @@ use std::{
     io::{self, Write},
     process::{Command, exit},
 };
-use winreg::{HKCU, RegKey, enums::*};
+
+use windows_registry::{CURRENT_USER, Key};
 
 type IoResult<T> = Result<T, io::Error>;
 
@@ -18,11 +19,6 @@ fn show_help(code: i32) {
     exit(code)
 }
 
-macro_rules! env_set_value {
-    () => {
-        HKCU.open_subkey_with_flags(ENVIRONMENT, KEY_SET_VALUE)
-    };
-}
 fn main() -> IoResult<()> {
     let mut args = env::args().skip(1).peekable();
     match (&args.next(), args.peek()) {
@@ -32,7 +28,7 @@ fn main() -> IoResult<()> {
             show_help(0)
         }
         (Some(flag), Some(_)) if flag.starts_with("-") => {
-            let cu_env = HKCU.open_subkey_with_flags(ENVIRONMENT, KEY_ALL_ACCESS)?;
+            let cu_env = CURRENT_USER.options().read().write().open(ENVIRONMENT)?;
             let args: Vec<_> = args.collect();
             let flag = flag.trim_start_matches("-");
             set_path(args, flag, cu_env)?;
@@ -49,15 +45,15 @@ fn main() -> IoResult<()> {
     Ok(())
 }
 
-fn set_path(args: Vec<String>, flag: &str, cu_env: RegKey) -> IoResult<()> {
-    let mut path_var: String = cu_env.get_value(PATH)?;
+fn set_path(args: Vec<String>, flag: &str, cu_env: Key) -> IoResult<()> {
+    let mut path_var: String = cu_env.get_string(PATH)?;
 
     const SEMICOLON: &str = ";";
     const LF: &str = "\n";
 
     macro_rules! set_path_val {
         ($val:tt) => {
-            cu_env.set_value(PATH, &$val)?;
+            cu_env.set_expand_string(PATH, &$val)?;
             unsafe { env::set_var(PATH, &$val) };
         };
     }
@@ -115,14 +111,14 @@ fn set_path(args: Vec<String>, flag: &str, cu_env: RegKey) -> IoResult<()> {
 }
 
 fn set_var(name: &str, value: &str) -> IoResult<()> {
-    let cu_env = env_set_value!()?;
-    cu_env.set_value(name, &value)?;
+    let key = CURRENT_USER.options().write().open(ENVIRONMENT)?;
+    key.set_string(name, value)?;
     unsafe { env::set_var(name, value) };
     Ok(())
 }
 fn remove_var(name: &str) -> IoResult<()> {
-    let cu_env = env_set_value!()?;
-    cu_env.delete_value(name)?;
+    let key = CURRENT_USER.options().write().open(ENVIRONMENT)?;
+    key.remove_value(name)?;
     unsafe { env::remove_var(name) };
     Ok(())
 }
