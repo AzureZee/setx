@@ -11,9 +11,9 @@ type IoResult<T> = Result<T, io::Error>;
 
 fn show_help(code: i32) {
     let msg = "Usage:
-    setx <var-name> [value]    if value is none, will remove this var.
-    setx -[(a|append)|(p|prepend)|(d|delete)] <paths...>
-    setx -[e|edit-path] <editor>    use editor edit PATH";
+    setv <var-name> [value]    if value is none, will remove this var.
+    setv -[(a|append)|(p|prepend)|(d|delete)] <paths...>
+    setv -[e|edit-path] <editor>    use editor edit PATH";
 
     eprintln!("{}", msg);
     exit(code)
@@ -56,7 +56,7 @@ fn set_path(args: Vec<String>, flag: &str, cu_env: Key) -> IoResult<()> {
             cu_env.set_expand_string(PATH, &$val)?;
         };
     }
-    Ok(match flag {
+    match flag {
         "a" | "append" => {
             let path_args = args.join(SEMICOLON);
             if !path_var.ends_with(SEMICOLON) {
@@ -106,7 +106,8 @@ fn set_path(args: Vec<String>, flag: &str, cu_env: Key) -> IoResult<()> {
         _ => {
             show_help(1);
         }
-    })
+    }
+    Ok(())
 }
 
 fn set_var(name: &str, value: &str) -> IoResult<()> {
