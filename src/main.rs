@@ -29,7 +29,6 @@ fn main() -> IoResult<()> {
             let args: Vec<_> = args.collect();
             let flag = flag.trim_start_matches("-");
             set_path(args, flag, key)?;
-            notify_environment_changed();
         }
         (Some(name), value) if !name.starts_with("-") => {
             if let Some(value) = value {
@@ -37,7 +36,6 @@ fn main() -> IoResult<()> {
             } else {
                 remove_var(name)?
             }
-            notify_environment_changed();
         }
         _ => show_help(1),
     }
@@ -106,6 +104,7 @@ fn set_path(args: Vec<String>, flag: &str, key: Key) -> IoResult<()> {
             show_help(1);
         }
     }
+    notify_environment_changed();
     Ok(())
 }
 
@@ -130,12 +129,14 @@ fn set_var(name: &str, value: &str) -> IoResult<()> {
     } else {
         key.set_string(name, value)?;
     }
+    notify_environment_changed();
     Ok(())
 }
 
 fn remove_var(name: &str) -> IoResult<()> {
     let key = env_key()?;
     key.remove_value(name)?;
+    notify_environment_changed();
     Ok(())
 }
 
