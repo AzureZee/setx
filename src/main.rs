@@ -31,11 +31,7 @@ fn main() -> IoResult<()> {
             set_path(args, flag, key)?;
         }
         (Some(name), value) if !name.starts_with("-") => {
-            if let Some(value) = value {
-                set_var(name, value)?
-            } else {
-                remove_var(name)?
-            }
+            set_env_var(env_key()?, name, value.map(|x| x.as_str()))?;
         }
         _ => show_help(1),
     }
@@ -48,25 +44,20 @@ fn set_path(args: Vec<String>, flag: &str, key: Key) -> IoResult<()> {
     const SEMICOLON: &str = ";";
     const LF: &str = "\n";
 
-    macro_rules! set_path_val {
-        ($val:tt) => {
-            key.set_expand_string(PATH, &$val)?;
-        };
-    }
-    match flag {
+    let new_path = match flag {
         "a" | "append" => {
             let path_args = args.join(SEMICOLON);
             if !path_var.ends_with(SEMICOLON) {
                 path_var.push_str(SEMICOLON);
             }
             path_var.push_str(&path_args);
-            set_path_val!(path_var);
+            path_var
         }
         "p" | "prepend" => {
-            let mut path_args = args.join(SEMICOLON);
-            path_args.push_str(SEMICOLON);
-            path_args.push_str(&path_var);
-            set_path_val!(path_args);
+            let mut new = args.join(SEMICOLON);
+            new.push_str(SEMICOLON);
+            new.push_str(&path_var);
+            new
         }
         "d" | "delete" => {
             let new = path_var
@@ -75,7 +66,7 @@ fn set_path(args: Vec<String>, flag: &str, key: Key) -> IoResult<()> {
                 .filter_map(|p| (!args.iter().any(|a| a == p)).then_some(p))
                 .collect::<Vec<_>>()
                 .join(SEMICOLON);
-            set_path_val!(new);
+            new
         }
         "e" | "edit-path" => {
             let tmp_file_path = env::temp_dir().join("edit-path_xxxxxx.txt");
@@ -96,15 +87,14 @@ fn set_path(args: Vec<String>, flag: &str, key: Key) -> IoResult<()> {
 
             let new = read_to_string(&tmp_file_path)?;
             let new = new.trim_end().replace(LF, SEMICOLON);
-            set_path_val!(new);
-
             remove_file(tmp_file_path)?;
+            new
         }
         _ => {
             show_help(1);
         }
-    }
-    notify_environment_changed();
+    };
+    set_env_var(key, PATH, Some(new_path.as_str()))?;
     Ok(())
 }
 
@@ -122,20 +112,19 @@ fn env_key() -> IoResult<Key> {
     Ok(key)
 }
 
-fn set_var(name: &str, value: &str) -> IoResult<()> {
-    let key = env_key()?;
-    if value.contains("%") {
-        key.set_expand_string(name, value)?;
-    } else {
-        key.set_string(name, value)?;
+fn set_env_var(key: Key, name: &str, value: Option<&str>) -> IoResult<()> {
+    match value {
+        Some(value) => {
+            if value.contains("%") || name == PATH {
+                key.set_expand_string(name, value)?;
+            } else {
+                key.set_string(name, value)?;
+            }
+        }
+        None => {
+            key.remove_value(name)?;
+        }
     }
-    notify_environment_changed();
-    Ok(())
-}
-
-fn remove_var(name: &str) -> IoResult<()> {
-    let key = env_key()?;
-    key.remove_value(name)?;
     notify_environment_changed();
     Ok(())
 }
@@ -184,7 +173,7 @@ fn notify_environment_changed() {
     }
 }
 
-fn show_help(code: i32) {
+fn show_help(code: i32) -> ! {
     let msg = "Usage:
     By default, modify user variables;
     to modify system variables, please run as administrator.
