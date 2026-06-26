@@ -5,19 +5,16 @@ use std::{
     process::{Command, exit},
 };
 
-use windows_registry::{CURRENT_USER, Key};
+use windows::Win32::{
+    Foundation::{HANDLE, LPARAM, WPARAM},
+    Security::{GetTokenInformation, TOKEN_ELEVATION, TokenElevation},
+    UI::WindowsAndMessaging::{
+        HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
+    },
+};
+use windows_registry::{CURRENT_USER, Key, LOCAL_MACHINE};
 
 type IoResult<T> = Result<T, io::Error>;
-
-fn show_help(code: i32) {
-    let msg = "Usage:
-    setv <var-name> [value]    if value is none, will remove this var.
-    setv -[(a|append)|(p|prepend)|(d|delete)] <paths...>
-    setv -[e|edit-path] <editor>    use editor edit PATH";
-
-    eprintln!("{}", msg);
-    exit(code)
-}
 
 fn main() -> IoResult<()> {
     let mut args = env::args().skip(1).peekable();
@@ -28,10 +25,11 @@ fn main() -> IoResult<()> {
             show_help(0)
         }
         (Some(flag), Some(_)) if flag.starts_with("-") => {
-            let cu_env = CURRENT_USER.options().read().write().open(ENVIRONMENT)?;
+            let key = env_key()?;
             let args: Vec<_> = args.collect();
             let flag = flag.trim_start_matches("-");
-            set_path(args, flag, cu_env)?;
+            set_path(args, flag, key)?;
+            notify_environment_changed();
         }
         (Some(name), value) if !name.starts_with("-") => {
             if let Some(value) = value {
@@ -39,21 +37,22 @@ fn main() -> IoResult<()> {
             } else {
                 remove_var(name)?
             }
+            notify_environment_changed();
         }
         _ => show_help(1),
     }
     Ok(())
 }
 
-fn set_path(args: Vec<String>, flag: &str, cu_env: Key) -> IoResult<()> {
-    let mut path_var: String = cu_env.get_string(PATH)?;
+fn set_path(args: Vec<String>, flag: &str, key: Key) -> IoResult<()> {
+    let mut path_var: String = key.get_string(PATH)?;
 
     const SEMICOLON: &str = ";";
     const LF: &str = "\n";
 
     macro_rules! set_path_val {
         ($val:tt) => {
-            cu_env.set_expand_string(PATH, &$val)?;
+            key.set_expand_string(PATH, &$val)?;
         };
     }
     match flag {
@@ -110,15 +109,85 @@ fn set_path(args: Vec<String>, flag: &str, cu_env: Key) -> IoResult<()> {
     Ok(())
 }
 
+const USER_ENV: &str = "Environment";
+const SYSTEM_ENV: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+const PATH: &str = "Path";
+
+fn env_key() -> IoResult<Key> {
+    let (key, path) = if is_elevated()? {
+        (LOCAL_MACHINE, SYSTEM_ENV)
+    } else {
+        (CURRENT_USER, USER_ENV)
+    };
+    let key = key.options().read().write().open(path)?;
+    Ok(key)
+}
+
 fn set_var(name: &str, value: &str) -> IoResult<()> {
-    let key = CURRENT_USER.options().write().open(ENVIRONMENT)?;
+    let key = env_key()?;
     key.set_string(name, value)?;
     Ok(())
 }
+
 fn remove_var(name: &str) -> IoResult<()> {
-    let key = CURRENT_USER.options().write().open(ENVIRONMENT)?;
+    let key = env_key()?;
     key.remove_value(name)?;
     Ok(())
 }
-const ENVIRONMENT: &str = "Environment";
-const PATH: &str = "Path";
+
+// 检查当前进程是否已提权
+fn is_elevated() -> windows::core::Result<bool> {
+    // https://github.com/microsoft/windows-rs/issues/1363#issuecomment-1018671172
+    const CURRENT_PROCESS_TOKEN: HANDLE = HANDLE(-4isize as *mut _);
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-gettokeninformation
+    unsafe {
+        let mut elevation = TOKEN_ELEVATION::default();
+        let tokeninformation = Some(&mut elevation as *mut _ as *mut _);
+        let tokeninformationlength = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let mut ret_len = 0u32;
+
+        GetTokenInformation(
+            CURRENT_PROCESS_TOKEN,
+            TokenElevation,
+            tokeninformation,
+            tokeninformationlength,
+            &mut ret_len,
+        )?;
+        Ok(elevation.TokenIsElevated != 0)
+    }
+}
+
+// 通知所有顶级窗口环境变量已变更
+fn notify_environment_changed() {
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settingchange
+    // To effect a change in the environment variables for the system or the user, broadcast this message with lParam set to the string "Environment".
+    const ENV_W: windows::core::PCWSTR = windows::core::w!("Environment");
+    let lparam = LPARAM(ENV_W.as_ptr() as isize);
+
+    let timeout = 1000; // 1s
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            lparam,
+            SMTO_ABORTIFHUNG,
+            timeout,
+            None,
+        );
+    }
+}
+
+fn show_help(code: i32) {
+    let msg = "Usage:
+    By default, modify user variables;
+    to modify system variables, please run as administrator.
+
+    setv <var-name> [value]    if value is none, will remove this var.
+    setv -[(a|append)|(p|prepend)|(d|delete)] <paths...>
+    setv -[e|edit-path] <editor>    use editor edit PATH";
+
+    eprintln!("{}", msg);
+    exit(code)
+}
