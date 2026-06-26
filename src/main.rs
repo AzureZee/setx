@@ -102,6 +102,7 @@ const USER_ENV: &str = "Environment";
 const SYSTEM_ENV: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
 const PATH: &str = "Path";
 
+// 根据当前进程是否已提权来确定使用 `Machine/User Scope` 环境变量
 fn env_key() -> IoResult<Key> {
     let (key, path) = if is_elevated()? {
         (LOCAL_MACHINE, SYSTEM_ENV)
@@ -112,6 +113,8 @@ fn env_key() -> IoResult<Key> {
     Ok(key)
 }
 
+// 设置环境变量.
+// 如果 `value` 为 `None`, 就移除参数 `name` 所代表的环境变量
 fn set_env_var(key: Key, name: &str, value: Option<&str>) -> IoResult<()> {
     match value {
         Some(value) => {
@@ -155,7 +158,8 @@ fn is_elevated() -> windows::core::Result<bool> {
 // 通知所有顶级窗口环境变量已变更
 fn notify_environment_changed() {
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settingchange
-    // To effect a change in the environment variables for the system or the user, broadcast this message with lParam set to the string "Environment".
+    // To effect a change in the environment variables for the system or the user,
+    // broadcast this message with lParam set to the string "Environment".
     const ENV_W: windows::core::PCWSTR = windows::core::w!("Environment");
     let lparam = LPARAM(ENV_W.as_ptr() as isize);
 
