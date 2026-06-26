@@ -1,7 +1,15 @@
 [package]
-name = "setx"
+name    = "setx"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 windows-registry = "0.6.1"
+
+[profile.release]
+opt-level     = "z"
+strip         = true
+lto           = true
+panic         = "abort"
+incremental   = true
+codegen-units = 1
