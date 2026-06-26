@@ -125,7 +125,11 @@ fn env_key() -> IoResult<Key> {
 
 fn set_var(name: &str, value: &str) -> IoResult<()> {
     let key = env_key()?;
-    key.set_string(name, value)?;
+    if value.contains("%") {
+        key.set_expand_string(name, value)?;
+    } else {
+        key.set_string(name, value)?;
+    }
     Ok(())
 }
 
