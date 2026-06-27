@@ -12,26 +12,23 @@ use windows::Win32::{
         HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
     },
 };
-use windows_registry::{CURRENT_USER, Key, LOCAL_MACHINE};
+use windows_registry::{CURRENT_USER, Key, LOCAL_MACHINE, ValueIterator};
 
 type IoResult<T> = Result<T, io::Error>;
 
 fn main() -> IoResult<()> {
     let mut args = env::args().skip(1).peekable();
-    match (&args.next(), args.peek()) {
-        (Some(flag), ..)
-            if flag.starts_with("-") && matches!(flag.trim_start_matches("-"), "h" | "help") =>
-        {
-            show_help(0)
-        }
+    match (args.next().as_deref(), args.peek()) {
+        (Some("-h") | Some("-help"), ..) => show_help(0),
+        (Some("-l") | Some("-list"), ..) => list_env()?,
         (Some(flag), Some(_)) if flag.starts_with("-") => {
-            let key = env_key()?;
+            let key = env_scope()?.read_write()?;
             let args: Vec<_> = args.collect();
             let flag = flag.trim_start_matches("-");
             set_path_var(key, flag, args)?;
         }
         (Some(name), value) if !name.starts_with("-") => {
-            set_env_var(env_key()?, name, value.map(|x| x.as_str()))?;
+            set_env_var(env_scope()?.write()?, name, value.map(|x| x.as_str()))?;
         }
         _ => show_help(1),
     }
@@ -98,20 +95,69 @@ fn set_path_var(key: Key, flag: &str, args: Vec<String>) -> IoResult<()> {
     Ok(())
 }
 
-const USER_ENV: &str = "Environment";
-const SYSTEM_ENV: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+const USER_ENV_PATH: &str = "Environment";
+const MACHINE_ENV_PATH: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
 const PATH: &str = "Path";
 
-// 根据当前进程是否已提权来确定使用 `Machine/User Scope` 环境变量
-fn env_key() -> IoResult<Key> {
-    let (key, path) = if is_elevated()? {
-        (LOCAL_MACHINE, SYSTEM_ENV)
-    } else {
-        (CURRENT_USER, USER_ENV)
+fn list_env() -> IoResult<()> {
+    let machine = MACHINE_ENV.read()?;
+    let user = USER_ENV.read()?;
+    let user_values = user.values()?;
+    let machine_values = machine.values()?;
+
+    let format_section = |title: &str, values: ValueIterator<'_>| -> String {
+        let body = values
+            .map(|(n, v)| format!("{n} = {}", String::try_from(v).unwrap_or_default()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("========== {title} ==========\n{body}")
     };
-    let key = key.options().read().write().open(path)?;
-    Ok(key)
+
+    print!(
+        "{}\n\n{}",
+        format_section("User Environment Variables", user_values),
+        format_section("Machine Environment Variables", machine_values),
+    );
+    Ok(())
 }
+
+// 根据当前进程是否已提权来确定使用 `Machine/User Scope` 环境变量
+fn env_scope() -> IoResult<Env> {
+    let env = if is_elevated()? {
+        MACHINE_ENV
+    } else {
+        USER_ENV
+    };
+    Ok(env)
+}
+
+struct Env {
+    scope: &'static Key,
+    path: &'static str,
+}
+
+impl Env {
+    fn read(&self) -> IoResult<Key> {
+        let key = self.scope.options().read().open(self.path)?;
+        Ok(key)
+    }
+    fn write(&self) -> IoResult<Key> {
+        let key = self.scope.options().write().open(self.path)?;
+        Ok(key)
+    }
+    fn read_write(&self) -> IoResult<Key> {
+        let key = self.scope.options().read().write().open(self.path)?;
+        Ok(key)
+    }
+}
+const MACHINE_ENV: Env = Env {
+    scope: LOCAL_MACHINE,
+    path: MACHINE_ENV_PATH,
+};
+const USER_ENV: Env = Env {
+    scope: CURRENT_USER,
+    path: USER_ENV_PATH,
+};
 
 // 设置环境变量.
 // 如果 `value` 为 `None`, 就移除参数 `name` 所代表的环境变量
