@@ -2,6 +2,7 @@ use std::{
     env,
     fs::{File, read_to_string, remove_file},
     io::{self, Write},
+    path::Path,
     process::{Command, exit},
 };
 
@@ -121,9 +122,16 @@ fn list_env() -> IoResult<()> {
     Ok(())
 }
 
-// 根据当前进程是否已提权来确定使用 `Machine/User Scope` 环境变量
+/// if arg0 is 'setm' and current process is elevated,
+/// return MACHINE_ENV, else USER_ENV.
 fn env_scope() -> IoResult<Env> {
-    let env = if is_elevated()? {
+    let arg0 = env::args_os().next().unwrap();
+    let arg0 = Path::new(&arg0).file_stem().unwrap();
+    let env = if arg0 == "setm" {
+        if !is_elevated()? {
+            eprintln!("[Error]: permission denied!");
+            show_help(1)
+        }
         MACHINE_ENV
     } else {
         USER_ENV
@@ -225,8 +233,9 @@ fn notify_environment_changed() {
 
 fn show_help(code: i32) -> ! {
     let msg = "Usage:
-    By default, modify user variables;
-    to modify system variables, please run as administrator.
+    By default, 'setv' modify user environment variables;
+    to modify machine environment variables,
+    please run as administrator, and use command 'setm' instead.
 
     setv <var-name> [value]    if value is none, will remove this var.
     setv -[(a|append)|(p|prepend)|(d|delete)] <paths...>
