@@ -67,7 +67,14 @@ fn set_path_var(key: Key, flag: &str, args: Vec<String>) -> IoResult<()> {
             new
         }
         "e" | "edit-path" => {
-            let tmp_file_path = env::temp_dir().join("edit-path_xxxxxx.txt");
+            use std::time::SystemTime;
+
+            let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(n) => n.as_secs(),
+                Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+            };
+            let path = format!("edit-path_{}.txt",time);
+            let tmp_file_path = env::temp_dir().join(path);
             if tmp_file_path.exists() {
                 remove_file(&tmp_file_path)?;
             }
