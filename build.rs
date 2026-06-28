@@ -1,33 +1,71 @@
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn make_relative(from: &Path, to: &Path) -> PathBuf {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+
+    // 找公共前缀长度
+    let mut common = 0;
+    while common < from.len() && common < to.len() && from[common] == to[common] {
+        common += 1;
+    }
+
+    let mut rel_path = PathBuf::new();
+    // from 中剩余的每一层都加一个 ".."
+    for _ in common..from.len() {
+        rel_path.push("..");
+    }
+    // 再拼上 to 中剩余的部分
+    for comp in &to[common..] {
+        rel_path.push(comp.as_os_str());
+    }
+    rel_path
+}
 
 fn main() {
+    let install_root = if let Ok(var) = env::var("CARGO_HOME") {
+        Path::new(&var).join("bin")
+    } else {
+        Path::new("~/.cargo/bin").to_path_buf()
+    };
+
+    env::set_current_dir(install_root).unwrap();
+    let cwd = env::current_dir().unwrap();
+    dbg!(&cwd);
+
+    let setm = Path::new("setm.exe");
+    let link = Path::new("setv.exe");
+
     let root = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let rel_path = make_relative(&cwd, Path::new(&root));
+
     let mut profile = env::var("PROFILE").unwrap();
     if cfg!(unix) {
         let target = env::var("TARGET").unwrap();
         profile = format!("{target}/{profile}");
     }
-    let out = format!("{root}/target/{profile}");
 
-    env::set_current_dir(out).unwrap();
-    dbg!(env::current_dir().unwrap());
+    let original = format!("{}/target/{profile}/setv.exe", rel_path.to_string_lossy());
+    dbg!(&original);
 
-    let link = Path::new("setm.exe");
     if link.is_symlink() {
         return;
     }
-    let original = "setv.exe";
 
     #[cfg(windows)]
     {
+        use std::os::windows::fs::symlink_file;
         dbg!("windows");
-        std::os::windows::fs::symlink_file(original, link).unwrap();
+        symlink_file(original, link).unwrap();
+        symlink_file(link, setm).unwrap();
     }
     #[cfg(unix)]
     {
+        use std::os::unix::fs::symlink;
         dbg!("unix");
-        std::os::unix::fs::symlink(original, link).unwrap();
+        symlink(original, link).unwrap();
+        symlink(link, setm).unwrap();
     }
     println!("cargo::rerun-if-changed=build.rs");
 }
