@@ -30,23 +30,23 @@ fn main() {
         Path::new("~/.cargo/bin").to_path_buf()
     };
 
-    env::set_current_dir(install_root).unwrap();
-    let cwd = env::current_dir().unwrap();
-    dbg!(&cwd);
+    env::set_current_dir(&install_root).unwrap();
+    dbg!(&install_root);
 
     let setm = Path::new("setm.exe");
     let link = Path::new("setv.exe");
 
     let root = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let rel_path = make_relative(&cwd, Path::new(&root));
+    let mut original = make_relative(&install_root, Path::new(&root));
 
-    let mut profile = env::var("PROFILE").unwrap();
+    original.push("target");
     if cfg!(unix) {
         let target = env::var("TARGET").unwrap();
-        profile = format!("{target}/{profile}");
+        original.push(target);
     }
-
-    let original = format!("{}/target/{profile}/setv.exe", rel_path.to_string_lossy());
+    let profile = env::var("PROFILE").unwrap();
+    original.push(profile);
+    original.push("setv.exe");
     dbg!(&original);
 
     if link.is_symlink() {
