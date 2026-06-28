@@ -1,9 +1,7 @@
-use std::{
-    env::{self, set_current_dir},
-    io,
-};
+use std::env;
+use std::path::Path;
 
-fn main() -> io::Result<()> {
+fn main() {
     let root = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut profile = env::var("PROFILE").unwrap();
     if cfg!(unix) {
@@ -11,10 +9,15 @@ fn main() -> io::Result<()> {
         profile = format!("{target}/{profile}");
     }
     let out = format!("{root}/target/{profile}");
-    set_current_dir(out).unwrap();
+
+    env::set_current_dir(out).unwrap();
     dbg!(env::current_dir().unwrap());
+
+    let link = Path::new("setm.exe");
+    if link.is_symlink() {
+        return;
+    }
     let original = "setv.exe";
-    let link = "setm.exe";
 
     #[cfg(windows)]
     {
@@ -27,5 +30,4 @@ fn main() -> io::Result<()> {
         std::os::unix::fs::symlink(original, link).unwrap();
     }
     println!("cargo::rerun-if-changed=build.rs");
-    Ok(())
 }
